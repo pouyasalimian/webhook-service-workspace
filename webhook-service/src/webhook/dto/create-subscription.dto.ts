@@ -18,6 +18,6 @@ export class CreateSubscriptionDto {
   @IsString()
   @MinLength(1)
   @MaxLength(2048)
-  @IsUrl()
+  @IsUrl({ require_tld: false })
   endpoint!: string;
 }

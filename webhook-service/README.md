@@ -53,11 +53,29 @@ All routes use the `/api/v1` prefix. Request DTOs reject unknown fields and inva
 - `GET /webhook-subscriptions/:id` reads a subscription, including a soft-deleted one for audit.
 - `PATCH /webhook-subscriptions/:id` updates `endpoint` and/or `isActive`.
 - `DELETE /webhook-subscriptions/:id` sets `deletedAt` and deactivates the subscription; it does not remove delivery history.
+- `POST /webhook-subscriptions/:id/rotate-signing-secret` rotates its signing secret and returns it once.
 - `POST /payment-events` accepts `{ "eventId": "payment-event-123", "type": "PAYMENT_COMPLETED", "occurredAt": "2026-10-15T00:00:00Z", "payload": { "paymentId": "pay_123", "amount": 5000, "currency": "USD" } }`.
 
 Event ingestion writes the event, matching deliveries, and outbox rows in one database transaction. A new event returns `202 Accepted`; a repeated `eventId` returns `200 OK` with `duplicate: true` and the existing delivery count. It does not fan out twice. Subscriptions are selected only when their event type matches, they are active, and `deletedAt` is null. Each delivery snapshots the subscription endpoint at ingestion time.
 
 Subscription endpoints must be valid absolute HTTP(S) URLs. They are parsed with the standard `URL` API when a delivery is sent.
+
+Each subscription receives a cryptographically random 256-bit signing secret. The secret is returned only in the create response and when explicitly rotated; list/get responses never expose it. Every delivery includes `X-Webhook-Signature: sha256=<hex>` computed as HMAC-SHA256 over the exact UTF-8 JSON request body. Consumers must verify against the raw request bytes and compare signatures using a constant-time comparison. For example, in Node.js:
+
+```ts
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+function verifyWebhook(rawBody: Buffer, header: string, secret: string) {
+  const match = /^sha256=([a-f0-9]{64})$/.exec(header);
+  if (!match) return false;
+
+  const expected = createHmac('sha256', secret).update(rawBody).digest();
+  const received = Buffer.from(match[1], 'hex');
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
+```
+
+Secret rotation takes effect for subsequent delivery attempts. Configure the new secret at the consumer before using the rotation endpoint; this initial design does not provide an overlap window for old and new secrets.
 
 ## Delivery history APIs
 

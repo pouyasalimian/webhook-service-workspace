@@ -99,6 +99,7 @@ export class WebhookProcessor
       result = await this.httpClient.post(
         attempt.webhook.endpoint,
         attempt.webhook.id,
+        attempt.webhook.subscription.signingSecret,
         event,
       );
     } catch (error) {
@@ -167,6 +168,7 @@ export class WebhookProcessor
           event: {
             select: { sourceEventId: true, occurredAt: true, receivedAt: true },
           },
+          subscription: { select: { signingSecret: true } },
         },
       });
 

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHmac } from 'node:crypto';
 import { WebhookFailureReason } from '../../generated/prisma/enums.js';
 
 export class WebhookTransportError extends Error {
@@ -33,10 +34,15 @@ export class WebhookHttpClientService {
   async post(
     endpoint: string,
     webhookId: string,
+    signingSecret: string,
     event: { id: string; type: string; occurredAt: string; data: unknown },
   ): Promise<WebhookHttpResult> {
     const url = new URL(endpoint);
     const startedAt = Date.now();
+    const body = JSON.stringify(event);
+    const signature = createHmac('sha256', signingSecret)
+      .update(body, 'utf8')
+      .digest('hex');
 
     try {
       const response = await fetch(url, {
@@ -45,8 +51,9 @@ export class WebhookHttpClientService {
         headers: {
           'content-type': 'application/json',
           'idempotency-key': webhookId,
+          'x-webhook-signature': `sha256=${signature}`,
         },
-        body: JSON.stringify(event),
+        body,
         signal: AbortSignal.timeout(this.timeoutMs),
       });
 

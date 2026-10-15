@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
 import { CreateSubscriptionDto } from '../dto/create-subscription.dto.js';
@@ -14,9 +15,21 @@ export class WebhookSubscriptionService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateSubscriptionDto) {
-    return this.prisma.webhookSubscription.create({
-      data: { ...dto },
+    const signingSecret = this.generateSigningSecret();
+    const subscription = await this.prisma.webhookSubscription.create({
+      data: { ...dto, signingSecret },
+      select: {
+        id: true,
+        eventType: true,
+        endpoint: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        deletedAt: true,
+      },
     });
+
+    return { ...subscription, signingSecret };
   }
 
   async list(query: ListSubscriptionsQueryDto) {
@@ -32,6 +45,15 @@ export class WebhookSubscriptionService {
         orderBy: [{ createdAt: 'desc' }],
         take: query.limit,
         skip: query.offset,
+        select: {
+          id: true,
+          eventType: true,
+          endpoint: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          deletedAt: true,
+        },
       }),
       this.prisma.webhookSubscription.count({ where }),
     ]);
@@ -42,6 +64,15 @@ export class WebhookSubscriptionService {
   async get(id: string) {
     const subscription = await this.prisma.webhookSubscription.findUnique({
       where: { id },
+      select: {
+        id: true,
+        eventType: true,
+        endpoint: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        deletedAt: true,
+      },
     });
 
     if (!subscription) {
@@ -73,5 +104,23 @@ export class WebhookSubscriptionService {
     });
 
     return this.get(id);
+  }
+
+  async rotateSigningSecret(id: string) {
+    const signingSecret = this.generateSigningSecret();
+    const updated = await this.prisma.webhookSubscription.updateMany({
+      where: { id, deletedAt: null },
+      data: { signingSecret },
+    });
+
+    if (updated.count === 0) {
+      throw new NotFoundException('Active webhook subscription not found');
+    }
+
+    return { id, signingSecret };
+  }
+
+  private generateSigningSecret() {
+    return randomBytes(32).toString('hex');
   }
 }

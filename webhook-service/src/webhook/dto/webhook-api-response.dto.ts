@@ -24,6 +24,26 @@ export class WebhookSubscriptionResponseDto {
   deletedAt!: Date | null;
 }
 
+export class CreateWebhookSubscriptionResponseDto extends WebhookSubscriptionResponseDto {
+  @ApiProperty({
+    description:
+      'Shared HMAC-SHA256 secret. Store it securely; it is returned only when the subscription is created or its secret is rotated.',
+    example: '4b2c...64-hex-characters...a91f',
+  })
+  signingSecret!: string;
+}
+
+export class RotateWebhookSubscriptionSecretResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({
+    description: 'The newly generated shared HMAC-SHA256 secret.',
+    example: '4b2c...64-hex-characters...a91f',
+  })
+  signingSecret!: string;
+}
+
 export class WebhookSubscriptionListResponseDto {
   @ApiProperty({ type: [WebhookSubscriptionResponseDto] })
   data!: WebhookSubscriptionResponseDto[];
