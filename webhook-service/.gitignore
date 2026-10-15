@@ -1,0 +1,73 @@
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.test.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Testing and coverage
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+
+# TypeScript
+*.tsbuildinfo
+
+# NestJS
+.nest/
+
+# Package manager
+.npm/
+.pnpm-store/
+
+# IDEs and editors
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+.DS_Store
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Local databases and data
+*.sqlite
+*.sqlite3
+*.db
+
+# Docker overrides (optional)
+# docker-compose.override.yml
+
+# Serverless / deployment artifacts
+.serverless/
+.vercel/
+
+# Miscellaneous
+.cache/
+.eslintcache
