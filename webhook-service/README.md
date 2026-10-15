@@ -59,6 +59,14 @@ Event ingestion writes the event, matching deliveries, and outbox rows in one da
 
 Subscription endpoints must be valid absolute HTTP(S) URLs. They are parsed with the standard `URL` API when a delivery is sent.
 
+## Delivery history APIs
+
+- `GET /webhooks?status=FAILED&eventType=PAYMENT_COMPLETED&subscriptionId=<uuid>&eventId=<uuid>&createdAfter=<date-time>&createdBefore=<date-time>&limit=50&offset=0` lists deliveries with optional filters and stable newest-first pagination. The response includes `data`, `limit`, `offset`, and `total`.
+- `GET /webhooks/:id` returns a delivery's current status and attempt summaries.
+- `GET /webhooks/:id/deliveries` returns its individual HTTP attempts, including failure details and response bodies capped at 4096 characters.
+
+History responses omit the event payload and endpoint. The attempt list is ordered by attempt number, and an invalid date range where `createdAfter` is later than `createdBefore` returns `400 Bad Request`.
+
 ## Outbox and queue
 
 The outbox dispatcher starts with the Nest application and polls every `OUTBOX_POLL_INTERVAL_MS` (default `1000` ms). It processes up to 100 unpublished rows per poll, enqueues a `deliver-webhook` BullMQ job on the `webhook-deliveries` queue with ID `webhook-<webhookId>`, then records `publishedAt`. If enqueueing fails, the row stays unpublished for a later poll. If Redis accepted the job but updating PostgreSQL failed, the dispatcher can enqueue it again; BullMQ's deterministic job ID suppresses the duplicate while the job remains in the queue.
