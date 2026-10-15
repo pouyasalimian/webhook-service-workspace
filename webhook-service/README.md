@@ -43,3 +43,18 @@ pnpm start:dev
 pnpm build
 pnpm start:prod
 ```
+
+## Subscription and event APIs
+
+All routes use the `/api/v1` prefix. Request DTOs reject unknown fields and invalid types.
+
+- `POST /webhook-subscriptions` creates an active subscription. Example body: `{"eventType":"PAYMENT_COMPLETED","endpoint":"https://consumer.example.com/hooks"}`.
+- `GET /webhook-subscriptions?limit=50&offset=0&eventType=PAYMENT_COMPLETED&isActive=true` lists non-deleted subscriptions with stable pagination.
+- `GET /webhook-subscriptions/:id` reads a subscription, including a soft-deleted one for audit.
+- `PATCH /webhook-subscriptions/:id` updates `endpoint` and/or `isActive`.
+- `DELETE /webhook-subscriptions/:id` sets `deletedAt` and deactivates the subscription; it does not remove delivery history.
+- `POST /payment-events` accepts `{ "eventId": "payment-event-123", "type": "PAYMENT_COMPLETED", "occurredAt": "2026-10-15T00:00:00Z", "payload": { "paymentId": "pay_123", "amount": 5000, "currency": "USD" } }`.
+
+Event ingestion writes the event, matching deliveries, and outbox rows in one database transaction. A new event returns `202 Accepted`; a repeated `eventId` returns `200 OK` with `duplicate: true` and the existing delivery count. It does not fan out twice. Subscriptions are selected only when their event type matches, they are active, and `deletedAt` is null. Each delivery snapshots the subscription endpoint at ingestion time.
+
+Subscription endpoints must be absolute HTTP(S) URLs without embedded credentials or fragments. Production requires HTTPS. DNS results are checked and private/reserved destinations are rejected; loopback HTTP endpoints are allowed only in development or test for local receiver testing. Delivery-time DNS validation is still required when the worker is implemented to protect against DNS rebinding.
