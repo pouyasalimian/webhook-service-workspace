@@ -1,12 +1,10 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
-import { WEBHOOK_QUEUE_NAME } from './webhook-queue.constants.js';
-import { WebhookQueueService } from './webhook-queue.service.js';
+import { WebhookQueueService } from './services/webhook-queue.service.js';
+import { WEBHOOK_QUEUE_NAME } from '../constants/queue.constant.js';
 
 @Module({
-  imports: [
-    BullModule.registerQueue({ name: WEBHOOK_QUEUE_NAME }),
-  ],
+  imports: [BullModule.registerQueue({ name: WEBHOOK_QUEUE_NAME })],
   providers: [WebhookQueueService],
   exports: [WebhookQueueService],
 })

@@ -5,11 +5,12 @@ import { WebhookEventService } from './services/webhook-event.service.js';
 import { WebhookSubscriptionService } from './services/webhook-subscription.service.js';
 import { OutboxModule } from './outbox/outbox.module.js';
 import { WebhookHttpClientService } from './http/webhook-http-client.service.js';
-import { WebhookProcessor } from './queue/webhook.processor.js';
 import { WebhookQueueModule } from './queue/webhook-queue.module.js';
-import { WebhookReconciliationService } from './queue/webhook-reconciliation.service.js';
+import { WebhookReconciliationService } from './queue/services/webhook-reconciliation.service.js';
 import { WebhookHistoryController } from './controllers/webhook-history.controller.js';
 import { WebhookHistoryService } from './services/webhook-history.service.js';
+import { WebhookProcessor } from './queue/worker/webhook.processor.js';
+import { WebhookWorkerThreadsService } from './queue/worker/webhook-worker-threads.service.js';
 
 @Module({
   imports: [OutboxModule, WebhookQueueModule],
@@ -23,6 +24,7 @@ import { WebhookHistoryService } from './services/webhook-history.service.js';
     WebhookSubscriptionService,
     WebhookHttpClientService,
     WebhookProcessor,
+    WebhookWorkerThreadsService,
     WebhookReconciliationService,
     WebhookHistoryService,
   ],

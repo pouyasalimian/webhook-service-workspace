@@ -31,7 +31,7 @@ The design should be small enough to implement as a focused challenge while pres
 
 - Frontend or dashboard.
 - Blockchain integration.
-- Consumer-side signature verification and shared-secret management.
+- Timestamped signatures and replay-window enforcement.
 - Manual retry endpoint.
 - Multiple event types beyond the first payment event.
 - Exactly-once HTTP delivery (not achievable across an arbitrary network).
@@ -708,7 +708,11 @@ src/
     ├── queue/
     │   ├── webhook-queue.module.ts
     │   ├── webhook-queue.service.ts
-    │   ├── webhook.processor.ts
+    │   ├── worker/
+    │   │   ├── webhook.processor.ts
+    │   │   ├── webhook-worker-thread.ts
+    │   │   ├── webhook-worker-threads.service.ts
+    │   │   └── webhook-worker.module.ts
     │   └── webhook-retry.policy.ts
     └── http/
         └── webhook-http-client.service.ts
@@ -729,7 +733,7 @@ src/
 
 ## 13. Security and operational safeguards
 
-Consumer signature verification is out of scope for the first version, but the service still needs basic safeguards.
+Consumer-side signature verification support is provided by the per-subscription HMAC secret and request signature. Timestamped signatures and replay-window enforcement remain out of scope for this version; the service still needs the following basic safeguards.
 
 ### 13.1 Protect API operations
 
@@ -768,7 +772,7 @@ URL validation alone is not sufficient against SSRF.
 
 ### 13.5 Consumer authentication
 
-A later iteration can add HMAC signatures with a per-subscription secret, a timestamp header, and a replay window. That is intentionally separate from the initial delivery/idempotency design.
+The implementation adds an HMAC-SHA256 signature using a random secret per subscription. The secret is returned on creation and explicit rotation, and is omitted from ordinary subscription reads. Each outbound request includes `X-Webhook-Signature: sha256=<hex>`, computed over the exact UTF-8 JSON body. Timestamp headers and a replay window remain future work; consumers should also use the stable `Idempotency-Key` to deduplicate retries.
 
 ---
 
@@ -806,12 +810,13 @@ Use environment variables and validate them at application startup.
 | `REDIS_PASSWORD` | Optional Redis password. |
 | `WEBHOOK_HTTP_TIMEOUT_MS` | Maximum time for one outbound HTTP attempt. |
 | `WEBHOOK_MAX_RESPONSE_BYTES` | Maximum response body bytes to read/store. |
-| `WEBHOOK_WORKER_CONCURRENCY` | Number of jobs each worker process may execute concurrently. |
+| `WEBHOOK_WORKER_COUNT` | Number of additional Node.js worker threads that host BullMQ consumers; defaults to `1`. The main NestJS thread also consumes jobs. |
+| `WEBHOOK_WORKER_CONCURRENCY` | Number of jobs each thread's BullMQ consumer may execute concurrently. |
 | `OUTBOX_POLL_INTERVAL_MS` | Outbox dispatcher polling interval. |
 | `RECONCILIATION_INTERVAL_MS` | Frequency of recovery checks. |
 | `NODE_ENV` | Runtime environment. |
 
-The challenge requirement is two workers. This can mean two worker processes or a worker concurrency setting of two; document which setup is used. If two independent worker processes are required, run two instances of the worker entry point against the same Redis queue and PostgreSQL database.
+The main NestJS thread consumes the queue, and one additional Node.js worker thread is started by default. BullMQ concurrency is `2` in each consumer. Set `WEBHOOK_WORKER_COUNT` to increase the number of additional NestJS consumer threads; total in-flight capacity per service instance is `(WEBHOOK_WORKER_COUNT + 1) × WEBHOOK_WORKER_CONCURRENCY`. Each consumer thread reads from the same Redis queue and uses the same PostgreSQL database.
 
 ---
 
@@ -930,7 +935,7 @@ A practical target is roughly **12–17 hours**, depending on test infrastructur
 | Logical delivery identity | One `Webhook` per `(subscriptionId, eventId)` |
 | Attempt audit model | `WebhookDelivery` |
 | Outbox | Simple transactional outbox table and polling dispatcher |
-| Worker concurrency | Two workers sharing one queue |
+| Worker concurrency | Configurable consumer threads sharing one queue |
 | Claim protection | Atomic conditional PostgreSQL update |
 | Outbound idempotency header | `Idempotency-Key: <Webhook.id>` |
 | Success | Any 2xx response |
@@ -941,7 +946,7 @@ A practical target is roughly **12–17 hours**, depending on test infrastructur
 | Subscription deactivation | Prevents new deliveries; existing deliveries continue |
 | Subscription deletion | Soft delete |
 | Manual retry | Out of scope |
-| Consumer signature validation | Future iteration |
+| Request signature | HMAC-SHA256 per subscription over exact JSON body |
 | Delivery guarantee | At-least-once attempts; consumer idempotency needed for duplicate side-effect prevention |
 
 ---
@@ -955,5 +960,5 @@ Before writing the implementation, settle these details in code and tests:
 3. Verify the installed BullMQ version's custom-backoff indexing and test the exact retry schedule.
 4. Make duplicate source-event behavior deterministic and documented.
 5. Use database state and conditional updates as the authority for delivery claims and terminal states.
-6. Keep request/response size limits and SSRF defenses in place even though consumer signature verification is deferred.
+6. Keep request/response size limits and SSRF defenses in place. Add timestamped signatures and replay-window enforcement in a future iteration.
 7. Treat logs and responses as potentially sensitive; truncate response bodies and avoid logging secrets.

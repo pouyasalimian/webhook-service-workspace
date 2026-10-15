@@ -2,26 +2,26 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import type { Job } from 'bullmq';
-import { PrismaService } from '../../infrastructure/database/prisma.service.js';
+import { PrismaService } from '../../../infrastructure/database/prisma.service.js';
 import {
   WebhookAttemptStatus,
   WebhookFailureReason,
   WebhookStatus,
-} from '../../generated/prisma/enums.js';
+} from '../../../generated/prisma/enums.js';
 import {
   WebhookHttpClientService,
   WebhookTransportError,
-} from '../http/webhook-http-client.service.js';
-import {
-  WEBHOOK_JOB_NAME,
-  WEBHOOK_QUEUE_NAME,
-  type WebhookDeliveryJobData,
-} from './webhook-queue.constants.js';
+} from '../../http/webhook-http-client.service.js';
 import {
   MAX_DELIVERY_ATTEMPTS,
   getWebhookRetryDelayMs,
   webhookRetryBackoff,
-} from './webhook-retry.policy.js';
+} from '../webhook-retry.policy.js';
+import { type WebhookDeliveryJobData } from '../types/webhook-job-data.type.js';
+import {
+  WEBHOOK_JOB_NAME,
+  WEBHOOK_QUEUE_NAME,
+} from '../../constants/queue.constant.js';
 
 @Processor(WEBHOOK_QUEUE_NAME, {
   concurrency: 2,

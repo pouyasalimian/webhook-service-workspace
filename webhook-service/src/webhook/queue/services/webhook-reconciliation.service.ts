@@ -5,17 +5,17 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../../infrastructure/database/prisma.service.js';
+import { PrismaService } from '../../../infrastructure/database/prisma.service.js';
 import {
   WebhookAttemptStatus,
   WebhookFailureReason,
   WebhookStatus,
-} from '../../generated/prisma/enums.js';
+} from '../../../generated/prisma/enums.js';
 import { WebhookQueueService } from './webhook-queue.service.js';
 import {
   MAX_DELIVERY_ATTEMPTS,
   getWebhookRetryDelayMs,
-} from './webhook-retry.policy.js';
+} from '../webhook-retry.policy.js';
 
 const RECONCILIATION_BATCH_SIZE = 100;
 const PROCESSING_SAFETY_MARGIN_MS = 30_000;

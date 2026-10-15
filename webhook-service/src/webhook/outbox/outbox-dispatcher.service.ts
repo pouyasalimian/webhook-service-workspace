@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
-import { WebhookQueueService } from '../queue/webhook-queue.service.js';
+import { WebhookQueueService } from '../queue/services/webhook-queue.service.js';
 import {
   OUTBOX_BATCH_SIZE,
   OUTBOX_MESSAGE_TYPE,

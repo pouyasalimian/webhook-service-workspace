@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule } from '@nestjs/config';
 import { InfrastructureModule } from './infrastructure/infrastructure.module.js';
-import { WebhookRedisConnection } from './webhook/queue/webhook-redis-connection.js';
+import { WebhookRedisConnection } from './webhook/queue/configs/webhook-redis-connection.js';
 import { WebhookModule } from './webhook/webhook.module.js';
 
 @Module({

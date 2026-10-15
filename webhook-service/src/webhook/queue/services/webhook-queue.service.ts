@@ -2,14 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import {
-  WEBHOOK_JOB_NAME,
-  WEBHOOK_QUEUE_NAME,
-  type WebhookDeliveryJobData,
-} from './webhook-queue.constants.js';
-import {
   MAX_DELIVERY_ATTEMPTS,
   WEBHOOK_RETRY_BACKOFF_TYPE,
-} from './webhook-retry.policy.js';
+} from '../webhook-retry.policy.js';
+import { type WebhookDeliveryJobData } from '../types/webhook-job-data.type.js';
+import {
+  WEBHOOK_JOB_NAME,
+  WEBHOOK_QUEUE_NAME,
+} from '../../constants/queue.constant.js';
 
 @Injectable()
 export class WebhookQueueService {
