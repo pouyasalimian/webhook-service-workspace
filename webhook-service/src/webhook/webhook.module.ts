@@ -6,15 +6,18 @@ import { WebhookSubscriptionService } from './services/webhook-subscription.serv
 import { OutboxModule } from './outbox/outbox.module.js';
 import { WebhookHttpClientService } from './http/webhook-http-client.service.js';
 import { WebhookProcessor } from './queue/webhook.processor.js';
+import { WebhookQueueModule } from './queue/webhook-queue.module.js';
+import { WebhookReconciliationService } from './queue/webhook-reconciliation.service.js';
 
 @Module({
-  imports: [OutboxModule],
+  imports: [OutboxModule, WebhookQueueModule],
   controllers: [PaymentEventsController, WebhookSubscriptionsController],
   providers: [
     WebhookEventService,
     WebhookSubscriptionService,
     WebhookHttpClientService,
     WebhookProcessor,
+    WebhookReconciliationService,
   ],
 })
 export class WebhookModule {}

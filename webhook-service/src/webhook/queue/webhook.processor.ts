@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnApplicationBootstrap,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import type { Job } from 'bullmq';
@@ -21,10 +17,21 @@ import {
   WEBHOOK_QUEUE_NAME,
   type WebhookDeliveryJobData,
 } from './webhook-queue.constants.js';
+import {
+  MAX_DELIVERY_ATTEMPTS,
+  getWebhookRetryDelayMs,
+  webhookRetryBackoff,
+} from './webhook-retry.policy.js';
 
-@Processor(WEBHOOK_QUEUE_NAME, { concurrency: 2 })
+@Processor(WEBHOOK_QUEUE_NAME, {
+  concurrency: 2,
+  settings: { backoffStrategy: webhookRetryBackoff },
+})
 @Injectable()
-export class WebhookProcessor extends WorkerHost implements OnApplicationBootstrap {
+export class WebhookProcessor
+  extends WorkerHost
+  implements OnApplicationBootstrap
+{
   private readonly logger = new Logger(WebhookProcessor.name);
 
   constructor(
@@ -105,29 +112,17 @@ export class WebhookProcessor extends WorkerHost implements OnApplicationBootstr
           ? error.message
           : 'Delivery request failed unexpectedly';
 
-      await this.recordFailure(attempt, reason, details, undefined, undefined);
-
-      this.logger.warn(
-        `Webhook attempt failed: webhookId=${webhookId} attempt=${attempt.attemptNumber} reason=${reason}`,
-      );
-
-      throw new Error('Retryable webhook delivery failure');
+      return this.failAttempt(attempt, reason, details);
     }
 
     if (result.statusCode < 200 || result.statusCode >= 300) {
-      await this.recordFailure(
+      return this.failAttempt(
         attempt,
         WebhookFailureReason.HTTP_ERROR,
         `HTTP endpoint returned status ${result.statusCode}`,
         result.statusCode,
         result.responseBody,
       );
-
-      this.logger.warn(
-        `Webhook attempt failed: webhookId=${webhookId} attempt=${attempt.attemptNumber} status=${result.statusCode}`,
-      );
-
-      throw new Error('Retryable webhook delivery failure');
     }
 
     await this.recordSuccess(
@@ -151,6 +146,7 @@ export class WebhookProcessor extends WorkerHost implements OnApplicationBootstr
         where: {
           id: webhookId,
           status: WebhookStatus.PENDING,
+          attemptCount: { lt: MAX_DELIVERY_ATTEMPTS },
           OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
         },
         data: {
@@ -243,6 +239,7 @@ export class WebhookProcessor extends WorkerHost implements OnApplicationBootstr
     details: string,
     statusCode?: number,
     responseBody?: string,
+    retryDelayMs = getWebhookRetryDelayMs(attempt.attemptNumber),
   ) {
     const completedAt = new Date();
     await this.prisma.$transaction(async (transaction) => {
@@ -265,9 +262,15 @@ export class WebhookProcessor extends WorkerHost implements OnApplicationBootstr
       const updated = await transaction.webhook.updateMany({
         where: { id: attempt.webhook.id, status: WebhookStatus.PROCESSING },
         data: {
-          status: WebhookStatus.PENDING,
+          status:
+            retryDelayMs === undefined
+              ? WebhookStatus.FAILED
+              : WebhookStatus.PENDING,
           failureReason: reason,
-          nextAttemptAt: null,
+          nextAttemptAt:
+            retryDelayMs === undefined
+              ? null
+              : new Date(completedAt.getTime() + retryDelayMs),
           processingStartedAt: null,
         },
       });
@@ -278,5 +281,35 @@ export class WebhookProcessor extends WorkerHost implements OnApplicationBootstr
         );
       }
     });
+  }
+
+  private async failAttempt(
+    attempt: NonNullable<
+      Awaited<ReturnType<WebhookProcessor['claimAndCreateAttempt']>>
+    >,
+    reason: WebhookFailureReason,
+    details: string,
+    statusCode?: number,
+    responseBody?: string,
+  ) {
+    const retryDelayMs = getWebhookRetryDelayMs(attempt.attemptNumber);
+    await this.recordFailure(
+      attempt,
+      reason,
+      details,
+      statusCode,
+      responseBody,
+      retryDelayMs,
+    );
+
+    this.logger.warn(
+      `Webhook attempt failed: webhookId=${attempt.webhook.id} attempt=${attempt.attemptNumber} reason=${reason}`,
+    );
+
+    if (retryDelayMs === undefined) {
+      throw new Error('Webhook delivery attempts exhausted');
+    }
+
+    throw new Error('Retryable webhook delivery failure');
   }
 }
