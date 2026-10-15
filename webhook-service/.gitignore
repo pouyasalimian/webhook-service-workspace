@@ -71,3 +71,5 @@ temp/
 # Miscellaneous
 .cache/
 .eslintcache
+
+/src/generated/prisma
