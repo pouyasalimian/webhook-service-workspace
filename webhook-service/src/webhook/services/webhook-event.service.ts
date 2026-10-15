@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
 import { ReceivePaymentEventDto } from '../dto/receive-payment-event.dto.js';
+import { OUTBOX_MESSAGE_TYPE } from '../constants/outbox.constant.js';
 
 @Injectable()
 export class WebhookEventService {
@@ -43,7 +44,7 @@ export class WebhookEventService {
           await transaction.outboxMessage.createMany({
             data: deliveries.map((delivery) => ({
               webhookId: delivery.id,
-              type: 'WEBHOOK_DELIVERY',
+              type: OUTBOX_MESSAGE_TYPE,
               payload: { webhookId: delivery.id },
             })),
           });

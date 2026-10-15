@@ -1,0 +1,2 @@
+export const OUTBOX_BATCH_SIZE = 100;
+export const OUTBOX_MESSAGE_TYPE = 'WEBHOOK_DELIVERY';
