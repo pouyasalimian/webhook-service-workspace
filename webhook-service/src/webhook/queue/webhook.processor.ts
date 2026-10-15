@@ -1,0 +1,265 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
+import type { Job } from 'bullmq';
+import { PrismaService } from '../../infrastructure/database/prisma.service.js';
+import {
+  WebhookAttemptStatus,
+  WebhookFailureReason,
+  WebhookStatus,
+} from '../../generated/prisma/enums.js';
+import {
+  WebhookHttpClientService,
+  WebhookTransportError,
+} from '../http/webhook-http-client.service.js';
+import {
+  WEBHOOK_JOB_NAME,
+  WEBHOOK_QUEUE_NAME,
+  type WebhookDeliveryJobData,
+} from './webhook-queue.constants.js';
+
+@Processor(WEBHOOK_QUEUE_NAME, { concurrency: 2 })
+@Injectable()
+export class WebhookProcessor extends WorkerHost {
+  private readonly logger = new Logger(WebhookProcessor.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly httpClient: WebhookHttpClientService,
+  ) {
+    super();
+  }
+
+  async process(job: Job<WebhookDeliveryJobData, unknown, string>) {
+    if (
+      job.name !== WEBHOOK_JOB_NAME ||
+      typeof job.data?.webhookId !== 'string'
+    ) {
+      throw new Error(`Invalid webhook delivery job: ${job.name}`);
+    }
+
+    return this.processDelivery(job.data.webhookId);
+  }
+
+  @OnWorkerEvent('error')
+  onWorkerError(error: Error) {
+    this.logger.error(`BullMQ worker error: ${error.message}`);
+  }
+
+  @OnWorkerEvent('failed')
+  onJobFailed(
+    job: Job<WebhookDeliveryJobData, unknown, string> | undefined,
+    error: Error,
+  ) {
+    this.logger.error(
+      `BullMQ job failed: jobId=${job?.id ?? 'unknown'} webhookId=${job?.data.webhookId ?? 'unknown'} error=${error.message}`,
+    );
+  }
+
+  private async processDelivery(webhookId: string) {
+    const attempt = await this.claimAndCreateAttempt(webhookId);
+    if (!attempt) {
+      return { skipped: true };
+    }
+
+    const event = {
+      id: attempt.webhook.event.sourceEventId,
+      type: attempt.webhook.eventType,
+      occurredAt: (
+        attempt.webhook.event.occurredAt ?? attempt.webhook.event.receivedAt
+      ).toISOString(),
+      data: attempt.webhook.payload,
+    };
+
+    let result;
+    try {
+      result = await this.httpClient.post(
+        attempt.webhook.endpoint,
+        attempt.webhook.id,
+        event,
+      );
+    } catch (error) {
+      const reason =
+        error instanceof WebhookTransportError
+          ? error.reason
+          : WebhookFailureReason.INTERNAL_ERROR;
+
+      const details =
+        error instanceof WebhookTransportError
+          ? error.message
+          : 'Delivery request failed unexpectedly';
+
+      await this.recordFailure(attempt, reason, details, undefined, undefined);
+
+      this.logger.warn(
+        `Webhook attempt failed: webhookId=${webhookId} attempt=${attempt.attemptNumber} reason=${reason}`,
+      );
+
+      throw new Error('Retryable webhook delivery failure');
+    }
+
+    if (result.statusCode < 200 || result.statusCode >= 300) {
+      await this.recordFailure(
+        attempt,
+        WebhookFailureReason.HTTP_ERROR,
+        `HTTP endpoint returned status ${result.statusCode}`,
+        result.statusCode,
+        result.responseBody,
+      );
+
+      this.logger.warn(
+        `Webhook attempt failed: webhookId=${webhookId} attempt=${attempt.attemptNumber} status=${result.statusCode}`,
+      );
+
+      throw new Error('Retryable webhook delivery failure');
+    }
+
+    await this.recordSuccess(
+      attempt,
+      result.statusCode,
+      result.responseBody,
+      result.durationMs,
+    );
+
+    this.logger.log(
+      `Webhook delivered: webhookId=${webhookId} attempt=${attempt.attemptNumber} status=${result.statusCode} durationMs=${result.durationMs}`,
+    );
+
+    return { delivered: true, statusCode: result.statusCode };
+  }
+
+  private claimAndCreateAttempt(webhookId: string) {
+    return this.prisma.$transaction(async (transaction) => {
+      const now = new Date();
+      const claimed = await transaction.webhook.updateMany({
+        where: {
+          id: webhookId,
+          status: WebhookStatus.PENDING,
+          OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+        },
+        data: {
+          status: WebhookStatus.PROCESSING,
+          processingStartedAt: now,
+          lastAttemptAt: now,
+          attemptCount: { increment: 1 },
+        },
+      });
+
+      if (claimed.count !== 1) {
+        return null;
+      }
+
+      const webhook = await transaction.webhook.findUnique({
+        where: { id: webhookId },
+        include: {
+          event: {
+            select: { sourceEventId: true, occurredAt: true, receivedAt: true },
+          },
+        },
+      });
+
+      if (!webhook)
+        throw new Error('Claimed webhook disappeared before attempt creation');
+
+      const deliveryAttempt = await transaction.webhookDelivery.create({
+        data: {
+          webhookId,
+          attemptNumber: webhook.attemptCount,
+          endpointAudit: webhook.endpoint,
+          status: WebhookAttemptStatus.PENDING,
+        },
+        select: { id: true, startedAt: true },
+      });
+
+      return {
+        id: deliveryAttempt.id,
+        startedAt: deliveryAttempt.startedAt,
+        attemptNumber: webhook.attemptCount,
+        webhook,
+      };
+    });
+  }
+
+  private async recordSuccess(
+    attempt: NonNullable<
+      Awaited<ReturnType<WebhookProcessor['claimAndCreateAttempt']>>
+    >,
+    statusCode: number,
+    responseBody: string,
+    durationMs: number,
+  ) {
+    const completedAt = new Date();
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.webhookDelivery.update({
+        where: { id: attempt.id },
+        data: {
+          status: WebhookAttemptStatus.SUCCESS,
+          clientHttpStatus: statusCode,
+          responseBody,
+          durationMs,
+          completedAt,
+        },
+      });
+
+      const updated = await transaction.webhook.updateMany({
+        where: { id: attempt.webhook.id, status: WebhookStatus.PROCESSING },
+        data: {
+          status: WebhookStatus.SUCCESS,
+          failureReason: null,
+          nextAttemptAt: null,
+          processingStartedAt: null,
+          succeededAt: completedAt,
+        },
+      });
+      if (updated.count !== 1) {
+        throw new Error(
+          'Webhook state changed before successful attempt was recorded',
+        );
+      }
+    });
+  }
+
+  private async recordFailure(
+    attempt: NonNullable<
+      Awaited<ReturnType<WebhookProcessor['claimAndCreateAttempt']>>
+    >,
+    reason: WebhookFailureReason,
+    details: string,
+    statusCode?: number,
+    responseBody?: string,
+  ) {
+    const completedAt = new Date();
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.webhookDelivery.update({
+        where: { id: attempt.id },
+        data: {
+          status: WebhookAttemptStatus.FAILED,
+          failureReason: reason,
+          failureDetails: details.slice(0, 2_000),
+          clientHttpStatus: statusCode,
+          responseBody,
+          durationMs: Math.max(
+            0,
+            completedAt.getTime() - attempt.startedAt.getTime(),
+          ),
+          completedAt,
+        },
+      });
+
+      const updated = await transaction.webhook.updateMany({
+        where: { id: attempt.webhook.id, status: WebhookStatus.PROCESSING },
+        data: {
+          status: WebhookStatus.PENDING,
+          failureReason: reason,
+          nextAttemptAt: null,
+          processingStartedAt: null,
+        },
+      });
+
+      if (updated.count !== 1) {
+        throw new Error(
+          'Webhook state changed before failed attempt was recorded',
+        );
+      }
+    });
+  }
+}

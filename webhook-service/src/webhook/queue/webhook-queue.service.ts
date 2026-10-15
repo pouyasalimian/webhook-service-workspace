@@ -1,20 +1,17 @@
-import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
-import { Queue } from 'bullmq';
-import { Redis } from 'ioredis';
+import { Injectable } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import {
   WEBHOOK_JOB_NAME,
-  WEBHOOK_QUEUE,
-  WEBHOOK_REDIS_CONNECTION,
+  WEBHOOK_QUEUE_NAME,
   type WebhookDeliveryJobData,
 } from './webhook-queue.constants.js';
 
 @Injectable()
-export class WebhookQueueService implements OnModuleDestroy {
+export class WebhookQueueService {
   constructor(
-    @Inject(WEBHOOK_QUEUE)
+    @InjectQueue(WEBHOOK_QUEUE_NAME)
     private readonly queue: Queue<WebhookDeliveryJobData>,
-    @Inject(WEBHOOK_REDIS_CONNECTION)
-    private readonly redis: Redis,
   ) {}
 
   enqueueDelivery(webhookId: string) {
@@ -23,10 +20,5 @@ export class WebhookQueueService implements OnModuleDestroy {
       { webhookId },
       { jobId: `webhook-${webhookId}` },
     );
-  }
-
-  async onModuleDestroy() {
-    await this.queue.close();
-    await this.redis.quit();
   }
 }

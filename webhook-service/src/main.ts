@@ -6,6 +6,7 @@ import { SwaggerConfig } from './configs/swagger.config.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
 
   app.setGlobalPrefix('api/v1');
 
