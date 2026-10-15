@@ -58,3 +58,9 @@ All routes use the `/api/v1` prefix. Request DTOs reject unknown fields and inva
 Event ingestion writes the event, matching deliveries, and outbox rows in one database transaction. A new event returns `202 Accepted`; a repeated `eventId` returns `200 OK` with `duplicate: true` and the existing delivery count. It does not fan out twice. Subscriptions are selected only when their event type matches, they are active, and `deletedAt` is null. Each delivery snapshots the subscription endpoint at ingestion time.
 
 Subscription endpoints must be absolute HTTP(S) URLs without embedded credentials or fragments. Production requires HTTPS. DNS results are checked and private/reserved destinations are rejected; loopback HTTP endpoints are allowed only in development or test for local receiver testing. Delivery-time DNS validation is still required when the worker is implemented to protect against DNS rebinding.
+
+## Outbox and queue
+
+The outbox dispatcher starts with the Nest application and polls every `OUTBOX_POLL_INTERVAL_MS` (default `1000` ms). It processes up to 100 unpublished rows per poll, enqueues a `deliver-webhook` BullMQ job on the `webhook-deliveries` queue with ID `webhook-<webhookId>`, then records `publishedAt`. If enqueueing fails, the row stays unpublished for a later poll. If Redis accepted the job but updating PostgreSQL failed, the dispatcher can enqueue it again; BullMQ's deterministic job ID suppresses the duplicate while the job remains in the queue.
+
+Redis connection settings are `REDIS_HOST`, `REDIS_PORT`, and optional `REDIS_PASSWORD`. BullMQ job data contains only `{ "webhookId": "<uuid>" }`; delivery state remains in PostgreSQL.
