@@ -72,4 +72,4 @@ temp/
 .cache/
 .eslintcache
 
-/src/generated/prisma
+/webhook-service/src/generated/prisma/
