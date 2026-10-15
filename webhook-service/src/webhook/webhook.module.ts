@@ -1,7 +1,5 @@
 import { Module } from '@nestjs/common';
-import { PaymentEventsController } from './controllers/payment-events.controller.js';
 import { WebhookSubscriptionsController } from './controllers/webhook-subscriptions.controller.js';
-import { WebhookEventService } from './services/webhook-event.service.js';
 import { WebhookSubscriptionService } from './services/webhook-subscription.service.js';
 import { OutboxModule } from './outbox/outbox.module.js';
 import { WebhookHttpClientService } from './http/webhook-http-client.service.js';
@@ -15,12 +13,10 @@ import { WebhookWorkerThreadsService } from './queue/worker/webhook-worker-threa
 @Module({
   imports: [OutboxModule, WebhookQueueModule],
   controllers: [
-    PaymentEventsController,
     WebhookSubscriptionsController,
     WebhookHistoryController,
   ],
   providers: [
-    WebhookEventService,
     WebhookSubscriptionService,
     WebhookHttpClientService,
     WebhookProcessor,

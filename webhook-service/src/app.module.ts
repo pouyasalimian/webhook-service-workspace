@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { InfrastructureModule } from './infrastructure/infrastructure.module.js';
 import { WebhookRedisConnection } from './webhook/queue/configs/webhook-redis-connection.js';
 import { WebhookModule } from './webhook/webhook.module.js';
+import { PaymentEventsModule } from './payment-events/payment-events.module.js';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { WebhookModule } from './webhook/webhook.module.js';
       }),
     }),
     WebhookModule,
+    PaymentEventsModule,
   ],
   controllers: [],
   providers: [],

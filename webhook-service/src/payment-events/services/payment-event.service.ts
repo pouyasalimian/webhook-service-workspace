@@ -2,11 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
+import { OUTBOX_MESSAGE_TYPE } from '../../webhook/constants/outbox.constant.js';
 import { ReceivePaymentEventDto } from '../dto/receive-payment-event.dto.js';
-import { OUTBOX_MESSAGE_TYPE } from '../constants/outbox.constant.js';
 
 @Injectable()
-export class WebhookEventService {
+export class PaymentEventService {
   constructor(private readonly prisma: PrismaService) {}
 
   async ingest(dto: ReceivePaymentEventDto) {

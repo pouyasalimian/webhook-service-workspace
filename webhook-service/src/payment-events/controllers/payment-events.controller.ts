@@ -8,14 +8,14 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { PaymentEventIngestResponseDto } from '../dto/payment-event-response.dto.js';
 import { ReceivePaymentEventDto } from '../dto/receive-payment-event.dto.js';
-import { PaymentEventIngestResponseDto } from '../dto/webhook-api-response.dto.js';
-import { WebhookEventService } from '../services/webhook-event.service.js';
+import { PaymentEventService } from '../services/payment-event.service.js';
 
 @ApiTags('Payment Events')
 @Controller('payment-events')
 export class PaymentEventsController {
-  constructor(private readonly webhookEventService: WebhookEventService) {}
+  constructor(private readonly paymentEventService: PaymentEventService) {}
 
   @Post()
   @ApiOperation({
@@ -38,7 +38,7 @@ export class PaymentEventsController {
     @Body() dto: ReceivePaymentEventDto,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const result = await this.webhookEventService.ingest(dto);
+    const result = await this.paymentEventService.ingest(dto);
     response.status(result.duplicate ? HttpStatus.OK : HttpStatus.ACCEPTED);
     return result;
   }
