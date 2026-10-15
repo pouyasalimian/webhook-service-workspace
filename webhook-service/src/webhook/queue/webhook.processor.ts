@@ -1,5 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import type { Job } from 'bullmq';
 import { PrismaService } from '../../infrastructure/database/prisma.service.js';
 import {
@@ -19,14 +24,26 @@ import {
 
 @Processor(WEBHOOK_QUEUE_NAME, { concurrency: 2 })
 @Injectable()
-export class WebhookProcessor extends WorkerHost {
+export class WebhookProcessor extends WorkerHost implements OnApplicationBootstrap {
   private readonly logger = new Logger(WebhookProcessor.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly httpClient: WebhookHttpClientService,
+    private readonly config: ConfigService,
   ) {
     super();
+  }
+
+  onApplicationBootstrap() {
+    const concurrency = Number(
+      this.config.get('WEBHOOK_WORKER_CONCURRENCY', 2),
+    );
+    if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+      throw new Error('WEBHOOK_WORKER_CONCURRENCY must be a positive integer');
+    }
+
+    this.worker.concurrency = concurrency;
   }
 
   async process(job: Job<WebhookDeliveryJobData, unknown, string>) {
