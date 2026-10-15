@@ -12,16 +12,16 @@ import {
   WebhookHttpClientService,
   WebhookTransportError,
 } from '../../http/webhook-http-client.service.js';
-import {
-  MAX_DELIVERY_ATTEMPTS,
-  getWebhookRetryDelayMs,
-  webhookRetryBackoff,
-} from '../webhook-retry.policy.js';
 import { type WebhookDeliveryJobData } from '../types/webhook-job-data.type.js';
 import {
   WEBHOOK_JOB_NAME,
   WEBHOOK_QUEUE_NAME,
 } from '../../constants/queue.constant.js';
+import {
+  getWebhookRetryDelayMs,
+  MAX_DELIVERY_ATTEMPTS,
+  webhookRetryBackoff,
+} from '../configs/webhook-retry.policy.js';
 
 @Processor(WEBHOOK_QUEUE_NAME, {
   concurrency: 2,

@@ -13,9 +13,9 @@ import {
 } from '../../../generated/prisma/enums.js';
 import { WebhookQueueService } from './webhook-queue.service.js';
 import {
-  MAX_DELIVERY_ATTEMPTS,
   getWebhookRetryDelayMs,
-} from '../webhook-retry.policy.js';
+  MAX_DELIVERY_ATTEMPTS,
+} from '../configs/webhook-retry.policy.js';
 
 const RECONCILIATION_BATCH_SIZE = 100;
 const PROCESSING_SAFETY_MARGIN_MS = 30_000;
