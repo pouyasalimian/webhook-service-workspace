@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsOptional,
@@ -8,12 +9,18 @@ import {
 } from 'class-validator';
 
 export class UpdateSubscriptionDto {
+  @ApiProperty({
+    example: 'https://consumer.example.com/webhooks/payments',
+    maxLength: 2048,
+    format: 'uri',
+  })
   @IsString()
   @MinLength(1)
   @MaxLength(2048)
   @IsUrl()
   endpoint: string;
 
+  @ApiProperty({ example: true })
   @IsBoolean()
   isActive: boolean;
 }
