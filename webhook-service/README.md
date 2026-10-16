@@ -2,24 +2,38 @@
 
 NestJS service for accepting payment events and delivering them to subscribed webhook endpoints. The design and delivery semantics are documented in [`../docs/webhook-delivery-architecture.md`](../docs/webhook-delivery-architecture.md).
 
-## Local development
+## Run the complete stack with Docker Compose
 
-Requirements: Node.js 22+, pnpm 10+, and Docker Compose.
+From the workspace root, start the API, PostgreSQL, Redis, and the one-shot Prisma migration service with:
 
 ```bash
+docker compose up --build
+```
+
+Compose waits for PostgreSQL and Redis health checks, applies committed Prisma migrations, then starts the API. The API is available at `http://localhost:3000/api/v1`, and Swagger UI is at `http://localhost:3000/swagger`. The local-only PostgreSQL credentials are `webhook` / `local-dev-password` for database `webhook_service`; Redis is exposed on port `6379`.
+
+Health endpoints are available at `GET /api/v1/health/check` (liveness, returns `true`) and `GET /api/v1/health/status` (application and PostgreSQL/Redis status; returns `503` if a dependency is unavailable).
+
+Set `WEBHOOK_WORKER_COUNT`, `WEBHOOK_WORKER_CONCURRENCY`, `WEBHOOK_HTTP_TIMEOUT_MS`, or `RECONCILIATION_INTERVAL_MS` in the shell or workspace `.env` file to override their Compose defaults. Use `docker compose logs -f webhook-service` to follow API logs. Stop the stack with `docker compose down`; this keeps the database and Redis volumes. `docker compose down -v` also deletes their persisted data.
+
+## Run Nest on the host
+
+Requirements: Node.js 24, pnpm 10, and Docker Compose for PostgreSQL and Redis.
+
+```bash
+docker compose up -d postgres redis
 pnpm install
 cp .env.example .env
-docker compose up -d postgres redis
 pnpm db:generate
 pnpm db:migrate
 pnpm start:dev
 ```
 
-The Compose stack exposes PostgreSQL on `localhost:5432` and Redis on `localhost:6379`. Its credentials are for local development only. `docker compose ps` shows service health; stop the services with `docker compose down` (use `docker compose down -v` only when you intend to delete local database and Redis data).
+The commands above run the Nest application directly on the host while Compose supplies PostgreSQL and Redis. The Compose stack exposes PostgreSQL on `localhost:5432` and Redis on `localhost:6379`. `docker compose ps` shows service health.
 
 ## Configuration
 
-`src/configs/env.validation.ts` validates and normalizes environment variables during Nest startup. `DATABASE_URL` is required and must be a PostgreSQL URL. Other development defaults are listed in `.env.example`.
+Nest loads environment variables through the global `ConfigModule`. `DATABASE_URL` is required and must be a PostgreSQL URL. Other development defaults are listed in `.env.example`.
 
 Prisma 7 reads the migration connection from `prisma.config.ts`; the Nest runtime creates its PostgreSQL driver adapter using the same `DATABASE_URL`.
 

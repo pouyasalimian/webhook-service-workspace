@@ -1,0 +1,84 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: webhook-service-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: webhook_service
+      POSTGRES_USER: webhook
+      POSTGRES_PASSWORD: local-dev-password
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U webhook -d webhook_service']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: webhook-service-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: ['redis-server', '--appendonly', 'yes']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: ./webhook-service
+      target: build
+    command: ['pnpm', 'db:deploy']
+    environment:
+      DATABASE_URL: postgresql://webhook:local-dev-password@postgres:5432/webhook_service?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  webhook-service:
+    build:
+      context: ./webhook-service
+      target: production
+    environment:
+      APP_ENV: development
+      APP_PORT: 3000
+      DATABASE_URL: postgresql://webhook:local-dev-password@postgres:5432/webhook_service?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      WEBHOOK_WORKER_COUNT: ${WEBHOOK_WORKER_COUNT:-1}
+      WEBHOOK_WORKER_CONCURRENCY: ${WEBHOOK_WORKER_CONCURRENCY:-2}
+      WEBHOOK_HTTP_TIMEOUT_MS: ${WEBHOOK_HTTP_TIMEOUT_MS:-10000}
+      RECONCILIATION_INTERVAL_MS: ${RECONCILIATION_INTERVAL_MS:-30000}
+    ports:
+      - '3000:3000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/v1/health/check').then(async r => process.exit(r.ok && (await r.json()) === true ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  postgres_data:
+  redis_data:
