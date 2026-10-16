@@ -1,0 +1,1 @@
+export const DEPENDENCY_CHECK_TIMEOUT_MS = 3_000;

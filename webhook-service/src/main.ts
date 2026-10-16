@@ -26,7 +26,11 @@ async function bootstrap() {
     SwaggerConfig.configure(app);
   }
 
-  const port = configService.get<number>('APP_PORT', 3000);
+  const port = Number(configService.get('APP_PORT', 3000));
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw new Error('APP_PORT must be an integer between 1 and 65535');
+  }
+
   await app.listen(port);
 }
 await bootstrap();

@@ -19,6 +19,7 @@ import { HealthModule } from './health/health.module.js';
     }),
     WebhookModule,
     PaymentEventsModule,
+    HealthModule,
   ],
   controllers: [],
   providers: [],
