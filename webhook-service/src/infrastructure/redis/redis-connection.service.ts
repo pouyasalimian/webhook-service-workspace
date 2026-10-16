@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
 
 @Injectable()
-export class WebhookRedisConnection implements OnApplicationShutdown {
+export class RedisConnectionService implements OnApplicationShutdown {
   readonly client: Redis;
 
   constructor(config: ConfigService) {
@@ -11,7 +11,7 @@ export class WebhookRedisConnection implements OnApplicationShutdown {
     const port = Number(config.get<string | number>('REDIS_PORT', 6379));
     const password = config.get<string>('REDIS_PASSWORD');
 
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
       throw new Error('REDIS_PORT must be an integer between 1 and 65535');
     }
 
@@ -19,7 +19,7 @@ export class WebhookRedisConnection implements OnApplicationShutdown {
       host,
       port,
       ...(password ? { password } : {}),
-      // Workers need this setting and BullMQ duplicates this client for blocking reads.
+      // BullMQ duplicates this connection for blocking reads.
       maxRetriesPerRequest: null,
     });
   }
