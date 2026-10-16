@@ -1,10 +1,12 @@
 # Webhook Delivery Service — Architecture & Design
 
-**Status:** Proposed design  
-**Stack:** Node.js, TypeScript, NestJS, PostgreSQL, Prisma, Redis, BullMQ  
-**Initial event type:** `PAYMENT_COMPLETED`  
-**Workers:** Two concurrent workers  
+**Status:** Design specification with an implemented challenge baseline; see Section 21 for the current behavior and gaps.
+**Stack:** Node.js, TypeScript, NestJS, PostgreSQL, Prisma, Redis, BullMQ
+**Initial event type:** `PAYMENT_COMPLETED`
+**Workers:** Main NestJS consumer plus configurable additional worker threads; per-consumer concurrency is configurable.
 **Scope:** Backend-only challenge implementation
+
+This document records the intended architecture and design constraints. The runnable setup and API instructions are in [`webhook-service/README.md`](../webhook-service/README.md); the workspace entry point is [`README.md`](../README.md). The implementation intentionally omits or simplifies some proposed production safeguards. Those differences are listed explicitly in Section 21 so the target design is not mistaken for existing runtime behavior.
 
 ---
 
@@ -58,15 +60,15 @@ flowchart LR
 
 ### Components
 
-| Component | Responsibility |
-|---|---|
-| NestJS API | Validates requests and exposes event, subscription, and delivery APIs. |
-| PostgreSQL | Source of truth for events, subscriptions, logical deliveries, attempt logs, and outbox records. |
-| Prisma | Database access and transaction management. |
-| Outbox dispatcher | Reads unpublished outbox rows and publishes corresponding jobs to BullMQ. |
-| Redis / BullMQ | Stores and schedules asynchronous delivery jobs and retry delays. |
-| Worker processes | Atomically claim logical deliveries, send HTTP requests, record attempts, and update delivery status. |
-| Subscriber endpoint | External consumer URL that receives the webhook POST. |
+| Component           | Responsibility                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| NestJS API          | Validates requests and exposes event, subscription, and delivery APIs.                                |
+| PostgreSQL          | Source of truth for events, subscriptions, logical deliveries, attempt logs, and outbox records.      |
+| Prisma              | Database access and transaction management.                                                           |
+| Outbox dispatcher   | Reads unpublished outbox rows and publishes corresponding jobs to BullMQ.                             |
+| Redis / BullMQ      | Stores and schedules asynchronous delivery jobs and retry delays.                                     |
+| Worker processes    | Atomically claim logical deliveries, send HTTP requests, record attempts, and update delivery status. |
+| Subscriber endpoint | External consumer URL that receives the webhook POST.                                                 |
 
 PostgreSQL is authoritative. BullMQ is the execution and scheduling mechanism, not the permanent record of delivery state.
 
@@ -102,14 +104,14 @@ A separate HTTP attempt has its own `WebhookDelivery.id` and `attemptNumber`, bu
 
 There are **six total attempts**: one initial attempt plus five retries.
 
-| Attempt | Timing |
-|---:|---|
-| 1 | Immediately |
-| 2 | 1 minute after attempt 1 fails |
-| 3 | 10 minutes after attempt 2 fails |
-| 4 | 30 minutes after attempt 3 fails |
-| 5 | 1 hour after attempt 4 fails |
-| 6 | 24 hours after attempt 5 fails |
+| Attempt | Timing                           |
+| ------: | -------------------------------- |
+|       1 | Immediately                      |
+|       2 | 1 minute after attempt 1 fails   |
+|       3 | 10 minutes after attempt 2 fails |
+|       4 | 30 minutes after attempt 3 fails |
+|       5 | 1 hour after attempt 4 fails     |
+|       6 | 24 hours after attempt 5 fails   |
 
 The delay is measured from completion of the preceding failed attempt. No retry is scheduled after attempt 6.
 
@@ -416,12 +418,12 @@ stateDiagram-v2
 
 ### State meanings
 
-| State | Meaning |
-|---|---|
-| `PENDING` | Waiting for the first attempt or a scheduled retry. |
-| `PROCESSING` | A worker has atomically claimed the logical delivery. |
-| `SUCCESS` | A 2xx response was received and recorded. Terminal. |
-| `FAILED` | A permanent failure occurred or all six attempts failed. Terminal in the initial version. |
+| State        | Meaning                                                                                   |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| `PENDING`    | Waiting for the first attempt or a scheduled retry.                                       |
+| `PROCESSING` | A worker has atomically claimed the logical delivery.                                     |
+| `SUCCESS`    | A 2xx response was received and recorded. Terminal.                                       |
+| `FAILED`     | A permanent failure occurred or all six attempts failed. Terminal in the initial version. |
 
 ### Atomic claim
 
@@ -528,10 +530,10 @@ BullMQ's retry mechanism and the database status are two systems, so do not assu
 
 ```ts
 const RETRY_DELAYS_MS = [
-  60_000,        // retry after attempt 1 fails: 1 minute
-  10 * 60_000,   // retry after attempt 2 fails: 10 minutes
-  30 * 60_000,   // retry after attempt 3 fails: 30 minutes
-  60 * 60_000,   // retry after attempt 4 fails: 1 hour
+  60_000, // retry after attempt 1 fails: 1 minute
+  10 * 60_000, // retry after attempt 2 fails: 10 minutes
+  30 * 60_000, // retry after attempt 3 fails: 30 minutes
+  60 * 60_000, // retry after attempt 4 fails: 1 hour
   24 * 60 * 60_000, // retry after attempt 5 fails: 24 hours
 ];
 ```
@@ -614,13 +616,13 @@ A duplicate event must not create new deliveries. Document and test the chosen d
 
 ### 11.2 Subscription endpoints
 
-| Method | Route | Purpose |
-|---|---|---|
-| `POST` | `/api/v1/webhook-subscriptions` | Create a subscription. |
-| `GET` | `/api/v1/webhook-subscriptions` | List subscriptions with pagination and optional filters. |
-| `GET` | `/api/v1/webhook-subscriptions/:id` | Get one subscription. |
-| `PATCH` | `/api/v1/webhook-subscriptions/:id` | Update endpoint or active status. |
-| `DELETE` | `/api/v1/webhook-subscriptions/:id` | Soft-delete/deactivate a subscription. |
+| Method   | Route                               | Purpose                                                  |
+| -------- | ----------------------------------- | -------------------------------------------------------- |
+| `POST`   | `/api/v1/webhook-subscriptions`     | Create a subscription.                                   |
+| `GET`    | `/api/v1/webhook-subscriptions`     | List subscriptions with pagination and optional filters. |
+| `GET`    | `/api/v1/webhook-subscriptions/:id` | Get one subscription.                                    |
+| `PATCH`  | `/api/v1/webhook-subscriptions/:id` | Update endpoint or active status.                        |
+| `DELETE` | `/api/v1/webhook-subscriptions/:id` | Soft-delete/deactivate a subscription.                   |
 
 Example create request:
 
@@ -633,11 +635,11 @@ Example create request:
 
 ### 11.3 Delivery query endpoints
 
-| Method | Route | Purpose |
-|---|---|---|
-| `GET` | `/api/v1/webhooks` | List logical deliveries with pagination and filters. |
-| `GET` | `/api/v1/webhooks/:id` | Get logical delivery status and details. |
-| `GET` | `/api/v1/webhooks/:id/deliveries` | List individual HTTP attempts for a logical delivery. |
+| Method | Route                             | Purpose                                               |
+| ------ | --------------------------------- | ----------------------------------------------------- |
+| `GET`  | `/api/v1/webhooks`                | List logical deliveries with pagination and filters.  |
+| `GET`  | `/api/v1/webhooks/:id`            | Get logical delivery status and details.              |
+| `GET`  | `/api/v1/webhooks/:id/deliveries` | List individual HTTP attempts for a logical delivery. |
 
 Useful filters for `GET /api/v1/webhooks` include `status`, `eventType`, `subscriptionId`, `eventId`, `createdAfter`, and `createdBefore`. Use pagination (cursor-based or limit/offset) and stable sorting by creation time and ID.
 
@@ -802,19 +804,19 @@ Database state transitions should be conditional. A worker must not overwrite a 
 
 Use environment variables and validate them at application startup.
 
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | PostgreSQL connection string. |
-| `REDIS_HOST` | Redis hostname. |
-| `REDIS_PORT` | Redis port. |
-| `REDIS_PASSWORD` | Optional Redis password. |
-| `WEBHOOK_HTTP_TIMEOUT_MS` | Maximum time for one outbound HTTP attempt. |
-| `WEBHOOK_MAX_RESPONSE_BYTES` | Maximum response body bytes to read/store. |
-| `WEBHOOK_WORKER_COUNT` | Number of additional Node.js worker threads that host BullMQ consumers; defaults to `1`. The main NestJS thread also consumes jobs. |
-| `WEBHOOK_WORKER_CONCURRENCY` | Number of jobs each thread's BullMQ consumer may execute concurrently. |
-| `OUTBOX_POLL_INTERVAL_MS` | Outbox dispatcher polling interval. |
-| `RECONCILIATION_INTERVAL_MS` | Frequency of recovery checks. |
-| `NODE_ENV` | Runtime environment. |
+| Variable                     | Purpose                                                                                                                             |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`               | PostgreSQL connection string.                                                                                                       |
+| `REDIS_HOST`                 | Redis hostname.                                                                                                                     |
+| `REDIS_PORT`                 | Redis port.                                                                                                                         |
+| `REDIS_PASSWORD`             | Optional Redis password.                                                                                                            |
+| `WEBHOOK_HTTP_TIMEOUT_MS`    | Maximum time for one outbound HTTP attempt.                                                                                         |
+| `WEBHOOK_MAX_RESPONSE_BYTES` | Maximum response body bytes to read/store.                                                                                          |
+| `WEBHOOK_WORKER_COUNT`       | Number of additional Node.js worker threads that host BullMQ consumers; defaults to `1`. The main NestJS thread also consumes jobs. |
+| `WEBHOOK_WORKER_CONCURRENCY` | Number of jobs each thread's BullMQ consumer may execute concurrently.                                                              |
+| `OUTBOX_POLL_INTERVAL_MS`    | Outbox dispatcher polling interval.                                                                                                 |
+| `RECONCILIATION_INTERVAL_MS` | Frequency of recovery checks.                                                                                                       |
+| `NODE_ENV`                   | Runtime environment.                                                                                                                |
 
 The main NestJS thread consumes the queue, and one additional Node.js worker thread is started by default. BullMQ concurrency is `2` in each consumer. Set `WEBHOOK_WORKER_COUNT` to increase the number of additional NestJS consumer threads; total in-flight capacity per service instance is `(WEBHOOK_WORKER_COUNT + 1) × WEBHOOK_WORKER_CONCURRENCY`. Each consumer thread reads from the same Redis queue and uses the same PostgreSQL database.
 
@@ -897,6 +899,8 @@ Do not make metrics or logs a substitute for persisted attempt history.
 
 ## 18. Implementation plan
 
+The six planned implementation phases have been implemented as a challenge baseline. Their original plan is retained here for traceability; current behavior and incomplete safeguards are summarized in Section 21.
+
 A reasonable focused implementation plan is:
 
 1. **Project setup and schema**
@@ -923,42 +927,61 @@ A practical target is roughly **12–17 hours**, depending on test infrastructur
 
 ## 19. Design decisions summary
 
-| Decision | Choice |
-|---|---|
-| Framework | NestJS + TypeScript |
-| ORM | Prisma |
-| Database | PostgreSQL |
-| Queue | BullMQ + Redis |
-| Initial event type | `PAYMENT_COMPLETED` enum |
-| Event ingestion | API |
-| Incoming idempotency | Unique `sourceEventId` |
-| Logical delivery identity | One `Webhook` per `(subscriptionId, eventId)` |
-| Attempt audit model | `WebhookDelivery` |
-| Outbox | Simple transactional outbox table and polling dispatcher |
-| Worker concurrency | Configurable consumer threads sharing one queue |
-| Claim protection | Atomic conditional PostgreSQL update |
-| Outbound idempotency header | `Idempotency-Key: <Webhook.id>` |
-| Success | Any 2xx response |
-| Retryable failures | Non-2xx responses, network failures, timeouts |
-| Retry policy | 1 minute, 10 minutes, 30 minutes, 1 hour, 24 hours |
-| Total attempts | Six including the initial attempt |
-| Terminal failure | `FAILED` after attempts are exhausted or a permanent failure |
-| Subscription deactivation | Prevents new deliveries; existing deliveries continue |
-| Subscription deletion | Soft delete |
-| Manual retry | Out of scope |
-| Request signature | HMAC-SHA256 per subscription over exact JSON body |
-| Delivery guarantee | At-least-once attempts; consumer idempotency needed for duplicate side-effect prevention |
+| Decision                    | Choice                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| Framework                   | NestJS + TypeScript                                                                      |
+| ORM                         | Prisma                                                                                   |
+| Database                    | PostgreSQL                                                                               |
+| Queue                       | BullMQ + Redis                                                                           |
+| Initial event type          | `PAYMENT_COMPLETED` enum                                                                 |
+| Event ingestion             | API                                                                                      |
+| Incoming idempotency        | Unique `sourceEventId`                                                                   |
+| Logical delivery identity   | One `Webhook` per `(subscriptionId, eventId)`                                            |
+| Attempt audit model         | `WebhookDelivery`                                                                        |
+| Outbox                      | Simple transactional outbox table and polling dispatcher                                 |
+| Worker concurrency          | Configurable consumer threads sharing one queue                                          |
+| Claim protection            | Atomic conditional PostgreSQL update                                                     |
+| Outbound idempotency header | `Idempotency-Key: <Webhook.id>`                                                          |
+| Success                     | Any 2xx response                                                                         |
+| Retryable failures          | Non-2xx responses, network failures, timeouts                                            |
+| Retry policy                | 1 minute, 10 minutes, 30 minutes, 1 hour, 24 hours                                       |
+| Total attempts              | Six including the initial attempt                                                        |
+| Terminal failure            | `FAILED` after attempts are exhausted or a permanent failure                             |
+| Subscription deactivation   | Prevents new deliveries; existing deliveries continue                                    |
+| Subscription deletion       | Soft delete                                                                              |
+| Manual retry                | Out of scope                                                                             |
+| Request signature           | HMAC-SHA256 per subscription over exact JSON body                                        |
+| Delivery guarantee          | At-least-once attempts; consumer idempotency needed for duplicate side-effect prevention |
 
 ---
 
-## 20. Final implementation notes
+## 20. Implementation checklist
 
-Before writing the implementation, settle these details in code and tests:
+The current code has one canonical `WebhookEvent` model, snapshots each delivery's endpoint, tests the installed BullMQ retry delays, treats duplicate source event IDs deterministically, and uses conditional database updates as the delivery-state authority. The attempt-history API truncates response bodies when returning them, but the delivery client still reads and stores the complete body.
 
-1. Keep one canonical `WebhookEvent` model in `schema.prisma`; use the paired relation definitions from Section 5.4.
-2. Add the `endpoint` snapshot field to `Webhook`, as specified in Section 8.
-3. Verify the installed BullMQ version's custom-backoff indexing and test the exact retry schedule.
-4. Make duplicate source-event behavior deterministic and documented.
-5. Use database state and conditional updates as the authority for delivery claims and terminal states.
-6. Keep request/response size limits and SSRF defenses in place. Add timestamped signatures and replay-window enforcement in a future iteration.
-7. Treat logs and responses as potentially sensitive; truncate response bodies and avoid logging secrets.
+Request/response byte limits, private-network and DNS-rebinding defenses, API authentication, encrypted secret storage, and timestamped signatures with replay-window enforcement remain future work. See Section 21 before deploying beyond a trusted local or challenge environment.
+
+## 21. Implemented behavior and known gaps
+
+This section describes the code currently in `webhook-service/src/`. The design requirements above remain the target where they are not yet implemented.
+
+| Area                | Current implementation                                                                                                                                                                                                                                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application modules | `PaymentEventsModule` owns `POST /api/v1/payment-events`; `WebhookModule` owns subscriptions and delivery history; `HealthModule` owns health endpoints. `InfrastructureModule` provides Prisma and the shared Redis connection.                                                                                 |
+| Database            | Prisma with PostgreSQL. Prisma properties use camelCase and `@map` / `@@map` map database columns, tables, and enum types to snake_case. Committed migrations are applied by the Compose `migrate` service.                                                                                                      |
+| Event ingestion     | Unique source event ID; one Prisma transaction creates the event, bulk-inserts matching logical deliveries using application-generated UUIDs, then bulk-inserts their outbox messages. A duplicate returns the already-created delivery count.                                                                   |
+| Outbox and queue    | Polling dispatcher publishes deterministic BullMQ job IDs from PostgreSQL outbox rows to Redis. PostgreSQL delivery state remains authoritative, with periodic reconciliation for unpublished or missing queue work.                                                                                             |
+| Workers and retries | The main NestJS process consumes jobs plus `WEBHOOK_WORKER_COUNT` extra worker threads. Each consumer has configurable concurrency. There are six total attempts, with delays of 1 minute, 10 minutes, 30 minutes, 1 hour, and 24 hours. All non-2xx responses and transport errors are retried until the limit. |
+| Signatures          | Outbound body-only HMAC-SHA256 in `X-Webhook-Signature: sha256=<hex>`. No timestamp is signed. Rotation immediately replaces the secret; there is no overlap period. The receiver example verifies the raw request body.                                                                                         |
+| Health              | `GET /api/v1/health/check` returns JSON `true`. `GET /api/v1/health/status` checks PostgreSQL and Redis concurrently, with a 3-second timeout per dependency, and returns `503` if either is down.                                                                                                               |
+| Local stack         | Root `docker-compose.yml` starts PostgreSQL, Redis, a one-shot Prisma migration job, and the Node 24 API image. Run `docker compose up --build` from the workspace root.                                                                                                                                         |
+| Tests               | Vitest unit tests cover event ingestion, subscription logic, signature transport, retry policy, and Prisma lifecycle. HTTP e2e tests cover the API routes and validation with persistence services mocked.                                                                                                       |
+
+### Known gaps from the target design
+
+- The API has no authentication or authorization for event ingestion, subscription management, or delivery history.
+- Endpoint URLs are validated and parsed, but the sender does not resolve or block private, loopback, link-local, or metadata IPs, and it does not defend against DNS rebinding. Arbitrary subscriber URLs therefore create an SSRF risk.
+- The HTTP client reads the full response body before storing it. The history response truncates output to 4096 characters, but that does not bound network reads or database storage.
+- Signing secrets are stored without encryption. The signature has no timestamp or replay window, and rotation invalidates the old secret immediately.
+- `POST /api/v1/payment-events` is this service's event-ingestion API; it does not verify an upstream provider's incoming webhook signature or raw-body deduplication scheme.
+- Compose uses fixed local-development database credentials and is not a production deployment configuration.

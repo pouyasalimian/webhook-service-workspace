@@ -21,7 +21,7 @@ Set `WEBHOOK_WORKER_COUNT`, `WEBHOOK_WORKER_CONCURRENCY`, `WEBHOOK_HTTP_TIMEOUT_
 Requirements: Node.js 24, pnpm 10, and Docker Compose for PostgreSQL and Redis.
 
 ```bash
-docker compose up -d postgres redis
+docker compose -f ../docker-compose.yml up -d postgres redis
 pnpm install
 cp .env.example .env
 pnpm db:generate
@@ -72,7 +72,7 @@ All routes use the `/api/v1` prefix. Request DTOs reject unknown fields and inva
 
 Event ingestion writes the event, matching deliveries, and outbox rows in one database transaction. A new event returns `202 Accepted`; a repeated `eventId` returns `200 OK` with `duplicate: true` and the existing delivery count. It does not fan out twice. Subscriptions are selected only when their event type matches, they are active, and `deletedAt` is null. Each delivery snapshots the subscription endpoint at ingestion time.
 
-Subscription endpoints must be valid absolute HTTP(S) URLs. They are parsed with the standard `URL` API when a delivery is sent.
+The subscription DTO validates endpoint URLs, and the delivery client parses them with the standard `URL` API before sending. The current implementation does not resolve and block private IP addresses or protect against DNS rebinding, so it is not safe to accept arbitrary untrusted endpoints as-is.
 
 Each subscription receives a cryptographically random 256-bit signing secret. The secret is returned only in the create response and when explicitly rotated; list/get responses never expose it. Every delivery includes `X-Webhook-Signature: sha256=<hex>` computed as HMAC-SHA256 over the exact UTF-8 JSON request body. Consumers must verify against the raw request bytes and compare signatures using a constant-time comparison. For example, in Node.js:
 
@@ -85,7 +85,9 @@ function verifyWebhook(rawBody: Buffer, header: string, secret: string) {
 
   const expected = createHmac('sha256', secret).update(rawBody).digest();
   const received = Buffer.from(match[1], 'hex');
-  return received.length === expected.length && timingSafeEqual(received, expected);
+  return (
+    received.length === expected.length && timingSafeEqual(received, expected)
+  );
 }
 ```
 
@@ -95,7 +97,7 @@ Secret rotation takes effect for subsequent delivery attempts. Configure the new
 
 - `GET /webhooks?status=FAILED&eventType=PAYMENT_COMPLETED&subscriptionId=<uuid>&eventId=<uuid>&createdAfter=<date-time>&createdBefore=<date-time>&limit=50&offset=0` lists deliveries with optional filters and stable newest-first pagination. The response includes `data`, `limit`, `offset`, and `total`.
 - `GET /webhooks/:id` returns a delivery's current status and attempt summaries.
-- `GET /webhooks/:id/deliveries` returns its individual HTTP attempts, including failure details and response bodies capped at 4096 characters.
+- `GET /webhooks/:id/deliveries` returns its individual HTTP attempts, including failure details and response bodies truncated to 4096 characters in the response. The current sender reads and stores the full response body without a byte limit.
 
 History responses omit the event payload and endpoint. The attempt list is ordered by attempt number, and an invalid date range where `createdAfter` is later than `createdBefore` returns `400 Bad Request`.
 
@@ -105,6 +107,8 @@ The outbox dispatcher starts with the Nest application and polls every `OUTBOX_P
 
 Redis connection settings are `REDIS_HOST`, `REDIS_PORT`, and optional `REDIS_PASSWORD`. BullMQ job data contains only `{ "webhookId": "<uuid>" }`; delivery state remains in PostgreSQL.
 
-The service starts `WEBHOOK_WORKER_COUNT` Node.js worker threads (default `1`), each running an independent NestJS BullMQ consumer for the same queue. Set it to `0` to run the API without consumers, or increase it to add consumers. Each consumer processes up to `WEBHOOK_WORKER_CONCURRENCY` jobs concurrently (default `2`), so the maximum in-flight jobs per service instance is worker count multiplied by per-thread concurrency. The processor claims a pending delivery and persists its next `WebhookDelivery` row before making an HTTP request. Requests use the event envelope, `Content-Type: application/json`, and the logical delivery UUID as `Idempotency-Key`. Redirects are not followed, and each request has a `WEBHOOK_HTTP_TIMEOUT_MS` deadline. Any 2xx response marks the delivery successful. HTTP, timeout, and network failures are recorded and retried for up to six total attempts, using delays of 1 minute, 10 minutes, 30 minutes, 1 hour, and 24 hours.
+The main NestJS thread always consumes the queue. `WEBHOOK_WORKER_COUNT` controls the number of additional Node.js worker threads (code default `1`), each running an independent NestJS BullMQ consumer; set it to `0` to disable the additional threads. Each consumer processes up to `WEBHOOK_WORKER_CONCURRENCY` jobs concurrently (code default `2`). Maximum in-flight jobs per API instance are therefore `(WEBHOOK_WORKER_COUNT + 1) × WEBHOOK_WORKER_CONCURRENCY`. The checked-in `.env.example` sets `WEBHOOK_WORKER_COUNT=2` and `WEBHOOK_WORKER_CONCURRENCY=30`, while Compose defaults to `1` and `2` unless overridden through environment variables. The processor claims a pending delivery and persists its next `WebhookDelivery` row before making an HTTP request. Requests use the event envelope, `Content-Type: application/json`, and the logical delivery UUID as `Idempotency-Key`. Redirects are not followed, and each request has a `WEBHOOK_HTTP_TIMEOUT_MS` deadline. Any 2xx response marks the delivery successful. HTTP, timeout, and network failures are recorded and retried for up to six total attempts, using delays of 1 minute, 10 minutes, 30 minutes, 1 hour, and 24 hours.
+
+The current signature is body-only HMAC-SHA256, and secrets are stored in the database without encryption. Secret rotation immediately replaces the prior secret; there is no overlap window. The event-ingestion API is not an inbound signed-webhook receiver.
 
 The reconciliation service runs every `RECONCILIATION_INTERVAL_MS` (default `30000` ms). It recovers deliveries left in `PROCESSING` longer than the HTTP timeout plus a 30-second safety margin, and re-enqueues due `PENDING` deliveries when their deterministic BullMQ job is missing or terminal. The database status and attempt history remain authoritative; conditional claims prevent duplicate jobs from sending concurrently.
